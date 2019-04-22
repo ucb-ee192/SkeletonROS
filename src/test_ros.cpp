@@ -4,15 +4,13 @@
 
 #include "ros/ros.h"
 #include <image_transport/image_transport.h>
-#include "test_ros/LedLag.h"
 #include <stdio.h>
 #include <robotcontrol.h>
 #include <rc_usefulincludes.h>
 
 float start_t;
-unsigned long long start_ts;
 
-void image_callback(const sensor_msgs::ImageConstPtr& msg)
+void imageCallback(const sensor_msgs::ImageConstPtr& msg)
 {
 	if (rc_get_state()==EXITING){
 		return;
@@ -31,9 +29,6 @@ void image_callback(const sensor_msgs::ImageConstPtr& msg)
 	unsigned int center; // Centroid of image brightness
 	unsigned long sum = 0; // Sum over all pixel brightness
 	unsigned long weighted_sum = 0; // For computing centroid
-
-	unsigned int g = 0;
-	unsigned int r = 0;
 
 	// Loop over image pixels
 	for (i=0; i<h; i++) // rows
@@ -54,14 +49,6 @@ void image_callback(const sensor_msgs::ImageConstPtr& msg)
 				// Compute image mean brightness and centroid
 				sum += pix;
 				weighted_sum += j*pix;
-
-				if (k == 0)
-				{
-					r += pix;
-				} else if (k == 1)
-				{
-					g += pix;
-				}
 			}
 		}
 	}
@@ -72,9 +59,6 @@ void image_callback(const sensor_msgs::ImageConstPtr& msg)
 	} else {
 		center = w/2;
 	}
-
-	g = g/(h*w);
-	r = r/(h*w);
 	
 	// Set steering servo output
 	unsigned int steer = (1500 + (center-w/2)*100)*1000;
@@ -90,26 +74,8 @@ void image_callback(const sensor_msgs::ImageConstPtr& msg)
 	int enc_pos = rc_encoder_eqep_read(1);
 
 	// Print image stats
-	//printf("Time: %.2f, Center: %d, Bright: %d Encoder: %d\n",
-	//	t, center, mean, enc_pos);
-	//printf("G: %d, R: %d T: %lld\n", g, r,
-	//		rc_nanos_since_boot()/1000000000);
-
-	if (g > r+3) {
-		unsigned long long lag=(rc_nanos_since_boot()-start_ts)/1000;
-		printf("TIME: %lld\n", lag);
-		rc_gpio_set_value(3, 2, 0);
-	}
-}
-
-bool handle_service(test_ros::LedLag::Request &req,
-		    test_ros::LedLag::Response &res) {
-	res.out = 0;
-	start_ts = rc_nanos_since_boot();
-	rc_gpio_set_value(3, 2, 1);
-	unsigned long long lag=(rc_nanos_since_boot()-start_ts)/1000;
-	ROS_INFO("Turning on LED, %lld (us)", lag);
-	return true;
+	printf("Time: %.2f, Center: %d, Bright: %d Encoder: %d\n",
+		t, center, mean, enc_pos);
 }
 
 void ros_rc_cleanup(void)
@@ -118,7 +84,6 @@ void ros_rc_cleanup(void)
 	rc_motor_cleanup();
 	rc_pwm_cleanup(0);
 	rc_encoder_eqep_cleanup();
-	rc_gpio_cleanup(3, 2);
 }
 
 void ros_compatible_shutdown_signal_handler(int signo)
@@ -146,11 +111,8 @@ int main(int argc, char **argv)
 	ROS_INFO("STARTED!");
 	ros::init(argc, argv, "test_ros");
 	ros::NodeHandle n;
-	ros::Subscriber sub = n.subscribe("/usb_cam/image_raw", 1,
-			image_callback);
-	ros::ServiceServer service = n.advertiseService("led_lag",
-			handle_service);
-
+	ros::Subscriber sub = n.subscribe("/usb_cam/image_raw",1,imageCallback);
+	
 	// Initialize signal handler
 	signal(SIGINT, ros_compatible_shutdown_signal_handler);
 	signal(SIGTERM, ros_compatible_shutdown_signal_handler);
@@ -160,14 +122,11 @@ int main(int argc, char **argv)
 
 	// Initialize GPS connector PWM
 	rc_pinmux_set(GPS_HEADER_PIN_4,PINMUX_PWM);
-	rc_pwm_init(0, 50);
+	rc_pwm_init(0,50);
 	rc_pwm_set_duty_ns(0, 'B', 1500000);
 
 	// Initialize H-bridge PWM
 	rc_motor_init_freq(25000);
-
-	// Initialize GPIO pin
-	rc_gpio_init(3, 2, GPIOHANDLE_REQUEST_OUTPUT);
 	
 	// Intialize quadrature encoder reader
 	rc_encoder_eqep_init();
